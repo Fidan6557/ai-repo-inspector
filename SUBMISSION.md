@@ -80,14 +80,36 @@ One commit per problem, each with its own tests, pushed at verified milestones:
 8. `docs:` the README covers the decision, the capability table, usage, exit
    and error codes, limits and safety.
 
+Second pass, added after the first submission draft:
+
+9. `ci:` "Public checks" now runs as a matrix on `ubuntu-latest` **and**
+   `windows-latest`, with `fail-fast` off. The Windows-specific `taskkill /T /F`
+   tree kill and the Windows path and git behaviour are now verified in CI, not
+   only on my machine.
+10. `feat(mcp):` operator-configured `--allowed-root` scoping, enforced in
+    `src/path-policy.ts`.
+    - Roots are canonicalized with `realpath` and must exist. An invalid root
+      makes the server exit 2 rather than start unrestricted (fail closed).
+    - `repo_path` is checked lexically first, so there is no existence oracle
+      outside the roots. It is then canonicalized with `realpath` and checked
+      again, which blocks symlink and junction escapes.
+    - After git resolves the repository, both the work-tree top level and the
+      git common directory must be inside a root. This blocks a subdirectory of
+      a repository that sits above the root, and a `.git` file redirecting to
+      an object store elsewhere.
+    - Containment uses `path.relative`, not string prefixes.
+    - MCP remains strictly read-only.
+
 ## What did you intentionally not do?
 
 - **Validations over MCP.** I removed them rather than allowlisting them.
   Even an allowlisted `npm test` runs code the repository controls, and the
   caller may be prompt-injected.
-- **Filesystem scoping for MCP** (`--allowed-root` / MCP Roots). The tool is
-  read-only and returns file names only, but any absolute path the user can
-  read can be inspected. This is the first next step.
+- **Default-deny for MCP.** Without `--allowed-root` the server still accepts
+  any absolute path, with a stderr warning. I kept that so existing setups
+  don't break. Requiring a root would be the safer default for a real release.
+- **Client-provided MCP Roots.** Scope comes only from the operator's
+  `--allowed-root` for now.
 - **MCP over HTTP, authentication, progress notifications, and cancellation of
   in-flight git calls.** Git calls have timeouts instead.
 - **Diff content or line counts in the report.** I kept the original scope:
@@ -110,6 +132,10 @@ One commit per problem, each with its own tests, pushed at verified milestones:
   - MCP may only run fixed, hardened git queries. It never runs commands,
     never writes files, rejects unknown arguments, and requires absolute
     paths.
+  - MCP can be confined with `--allowed-root`. The operator sets it in the MCP
+    client config; the caller can't change it. Paths, link targets, repository
+    top levels and git directories outside the roots return
+    `PATH_NOT_ALLOWED`.
 - **Reliability, discoverability, latency/context, and output tradeoffs:**
   - Reliability:
     - Every subprocess has a timeout and bounded buffers.
@@ -186,6 +212,17 @@ I used Claude Code (Claude Opus) throughout:
 - **Corrected a wrong test rather than the code.** One generated test expected
   `\r\n` in a filename to become two spaces. The renderer correctly collapses
   it to one, so the test was fixed.
+- **Went beyond the requested `realpath` check, and proved the extra layers
+  matter.** The second-pass instruction asked for paths to be canonicalized
+  with `realpath`. The agent pointed out that `realpath` alone still lets two
+  escapes through:
+  - a subdirectory inside the root that belongs to a repository above it;
+  - a `.git` file redirecting to an outside object store.
+
+  So it also checks git's resolved top level and common directory. To make
+  sure the security tests weren't passing vacuously, I had it mutation-check
+  each layer: disable it, confirm the specific test fails, then restore it.
+  All five layers turned out to be load-bearing.
 - **Caught a silent scripted-edit failure.** A scripted edit silently did
   nothing on files checked out with CRLF line endings (`core.autocrlf=true`).
   The pre-commit diff review caught it, and it was redone with exact edits.
@@ -200,14 +237,16 @@ Node 20.
 | `npm ci` | Installed 143 packages from the lockfile. |
 | `npm run typecheck` | Passed, no errors. |
 | `npm run build` | Emitted `dist/cli.js` and `dist/mcp-server.js`, among other files. |
-| `npm test` | **8 files, 53 tests passed.** Covers git (temp repos), report, core, CLI, MCP (in-memory), validation, packaging, and real-process parity. |
+| `npm test` | **9 files, 77 tests passed.** Covers git (temp repos), report, core, CLI, MCP (in-memory), validation, packaging, real-process parity, and allowed-root security (positive and negative). |
 | `node dist/cli.js --help` | Printed usage, exit 0. |
 | `node dist/cli.js review --repo . --format json --output -` | Valid JSON. Summary: "1 changed file compared with origin/main …" |
 | `node dist/cli.js review --repo . --output - --validate "node -e \"process.exit(1)\""` | Report written to stdout. Summary: "0 passed, 1 failed". **Exit 1.** |
 | `node dist/cli.js review --repo . --base-ref=--output=pwned` | `error[INVALID_BASE_REF]`, **exit 2**, no `pwned*` file created. |
 | A stdio SDK client script against `node dist/mcp-server.js` | Lists only `repo_path`/`base_ref` with read-only annotations. A call returns `structuredContent`. A call with `validationCommands` returns `isError` (input validation error). |
 | Mutation check: MCP given a different file cap | The parity test failed as expected; then reverted. |
-| GitHub Actions "Public checks" | Passed on every milestone push (`aa98b62`, `f4f756d`, `64e39ae`), including the POSIX process-group kill test. |
+| Mutation checks on `src/path-policy.ts`, one layer disabled at a time | Each failed exactly its target test, then the file was restored (verified with `cmp`):<br>• post-realpath check → symlink/junction escape<br>• git-dir check → `.git` redirect<br>• top-level check → repository above the root<br>• string-prefix containment → `allowed-evil` sibling<br>• lexical check → existence-oracle test |
+| GitHub Actions "Public checks", Ubuntu only | Passed on milestone pushes `aa98b62`, `f4f756d`, `64e39ae` and `fdd1b83`, including the POSIX process-group kill test. |
+| GitHub Actions "Public checks", Ubuntu + Windows | Both jobs passed on `fb5354a` (CI matrix) and `294c5fa` (allowed-root). The Windows log shows all 8 test files passing at `fb5354a`, including "kills a hanging command, including its child processes" (2.1 s), i.e. the `taskkill /T /F` path. At `294c5fa` both platforms ran all 9 test files, including the 24 allowed-root tests; on Windows the escape test uses a directory junction. |
 
 ## A blocker you hit and how you approached it
 
@@ -230,19 +269,27 @@ corrections section.
 ## Known limitations and the next three things you would do
 
 **Known limitations:**
-- MCP has no filesystem scoping.
+- MCP scoping is opt-in. Without `--allowed-root`, any absolute path the user
+  can read can be inspected; the server only prints a warning.
+- The path checks are check-then-use. Someone who can write inside an allowed
+  root could swap a directory for a link between the check and git running.
+  Read-only access limits the impact to file names.
+- While locating a repository, git may read metadata of a repository *above* a
+  root before the top-level check rejects it. No data is returned to the
+  caller. Setting `GIT_CEILING_DIRECTORIES` would stop git walking up at all.
 - Validation commands inherit the operator's full environment, including any
   secrets. That is acceptable only because the CLI operator is trusted.
 - MCP cancellation doesn't abort an in-flight git call. Git calls are bounded
   by 30 s timeouts.
-- There is no Windows CI job; Windows was verified locally only.
 - Renames are detected only when staged. An unstaged `mv` shows up as
   `deleted` plus `untracked`, which matches git's own semantics.
 - `durationMs` is the only non-deterministic field.
 
 **Next three:**
-1. Scope MCP to client **Roots** or an operator `--allowed-root`, and add a
-   Windows job to the CI matrix.
+1. Harden the scope further:
+   - make `--allowed-root` required (default-deny);
+   - set `GIT_CEILING_DIRECTORIES` from the roots;
+   - intersect operator roots with client-provided MCP **Roots**.
 2. If validations are needed through MCP: operator-allowlisted *named* commands
    in a sandbox, with a scrubbed environment and request cancellation wired to
    the process-tree kill.
@@ -253,4 +300,6 @@ corrections section.
 
 - Start: 21:13 (UTC+4), when implementation began after the plan was approved.
   *Candidate: confirm, and add earlier planning time if you count it.*
+- First pass committed at 21:43. The second pass (Windows CI and
+  `--allowed-root`) ran from 22:01 to about 22:15.
 - Finish: *candidate to fill in at submission*
