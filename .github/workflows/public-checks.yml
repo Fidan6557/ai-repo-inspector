@@ -6,8 +6,16 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    name: build-and-test (${{ matrix.os }})
+    # Windows matters here: validation timeouts kill the process tree with
+    # taskkill on Windows and with a process-group signal elsewhere, and paths
+    # and git config behave differently. Run the full suite on both.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
