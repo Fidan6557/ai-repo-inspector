@@ -1,41 +1,42 @@
 # Repository Inspector
 
-This is a small TypeScript developer tool that inspects changes in a Git
-repository, runs optional validation commands, and produces a Markdown report.
-It can be used from a command line or exposed to AI clients through MCP.
+A small TypeScript developer tool that reports what changed on the current
+branch of a Git repository, optionally runs validation commands, and produces
+a summary-first report as Markdown or JSON. It has two interfaces that share
+one core: a **CLI** for developers and CI, and a **read-only MCP server** for AI
+coding agents.
 
-## Your task
+The assessment write-up (investigation, decisions, verification and
+limitations) is in [`SUBMISSION.md`](SUBMISSION.md).
 
-Investigate the repository and improve it as you judge best. The starter works
-for a narrow happy path, but production use may expose correctness, safety,
-reliability, contract, output, documentation, or testing weaknesses.
+## Interface decision: hybrid
 
-You are not expected to finish everything. We care about how you investigate,
-prioritize, implement, verify, and explain a meaningful scope.
+| | CLI (`inspector`) | MCP (`review_repository` tool) |
+|---|---|---|
+| Primary user | Developer at a shell, CI pipeline | AI coding agent through a local MCP client (stdio) |
+| Who controls the input | Trusted operator | Model output, which untrusted repository content can influence |
+| Inspects git changes | Yes | Yes (identical result) |
+| Runs commands | Yes, `--validate <cmd>` (your permissions) | **Never** |
+| Writes files | Report to `--output` (or stdout) | **Never** (returns the report inline) |
+| Repository path | Absolute or relative to the cwd | Absolute only (the server's cwd is meaningless to the agent) |
+| Output | Markdown or JSON (`--format`) | Markdown text + the same JSON as `structuredContent` |
+| Errors | `error[CODE]: message` on stderr, exit 2 | `isError: true` with the same `error[CODE]: message` line |
 
-## Product decision
+**Why these capabilities differ.** A developer who runs the CLI already has a
+shell, so `--validate` adds no new power. An MCP caller is a model whose
+arguments can be steered by text in the repository (README files, filenames,
+earlier test output). If MCP accepted command strings, a prompt-injected agent
+could execute anything. So the MCP tool is limited to fixed, hardened git
+queries.
 
-This tool may be used directly by developers and by AI coding agents. Decide
-whether its production interface should be **CLI-first**, **MCP-first**, or
-**hybrid**. Implement improvements consistent with your decision.
-
-There is no preferred label. Explain:
-
-- The primary user and execution environment you assumed.
-- The trust boundary and allowed capabilities.
-- Reliability, discoverability, latency/context, and output-size tradeoffs.
-- How the interfaces you continue to advertise stay behaviorally consistent.
-- What evidence would change your decision.
-
-## Time and rules
-
-- Maximum **90 focused minutes** within 48 hours of receiving the invitation.
-- Use AI coding tools freely. Verify their work and document at least one
-  suggestion you corrected or rejected.
-- Work in your own repository created from this template.
-- Commit as you work and complete `SUBMISSION.md` in your final commit.
-- Completion is not required. Accurate scope and verification matter more than
-  a large diff.
+**How they stay consistent.**
+- Both adapters translate their input into the same `reviewRepository()` call.
+- Both render the same `ReviewResult`, defined once as a zod schema in
+  `src/schema.ts`.
+- Both report the same `InspectorError` codes.
+- `test/parity.test.ts` runs the real CLI process and the real stdio MCP server
+  against one repository and requires identical JSON, identical Markdown and
+  identical error lines.
 
 ## Setup
 
@@ -43,41 +44,133 @@ There is no preferred label. Explain:
 npm install
 npm run typecheck
 npm test
+npm run build      # emits dist/cli.js and dist/mcp-server.js
 ```
 
 ## CLI
 
 ```bash
-npm run inspector -- review --repo ./path/to/repo --format markdown
-npm run inspector -- review --repo ./path/to/repo --validate "npm test"
+npm run inspector -- review --repo ./path/to/repo
+npm run inspector -- review --repo ./path/to/repo --format json --output -
+npm run inspector -- review --repo . --base-ref origin/main --validate "npm test" --validate "npm run typecheck"
 ```
 
-The report is written to `review-report.md`.
+| Option | Meaning |
+|---|---|
+| `--repo <path>` | Repository (or a directory inside it). Required. |
+| `--base-ref <ref>` | Branch, tag or commit to compare against. Default: `origin/HEAD`, then `main`, then `master`. |
+| `--validate <cmd>` | Shell command run in the repository root. Repeatable. Each command runs even if an earlier one failed. |
+| `--timeout <seconds>` | Per-command validation timeout (default 300). The whole process tree is killed on timeout. |
+| `--format markdown\|json` | Report format (default `markdown`). |
+| `--output <file\|->` | Report destination. Default `review-report.md` / `review-report.json` in the cwd; `-` means stdout. Status lines always go to stderr. |
+| `-h, --help` | Usage. |
+
+Exit codes:
+- **0**: the review completed and every validation passed.
+- **1**: the review completed but a validation failed, timed out or could not
+  start. The report is still written.
+- **2**: the review could not run (bad arguments, not a Git repository, unknown
+  or unsafe base ref, unwritable output).
+
+Validation commands run with `CI=1`, `NO_COLOR=1` and no stdin, so test runners
+don't enter watch mode or wait for input.
 
 ## MCP
 
-Start the stdio server with:
-
 ```bash
-npm run mcp-server
+npm run mcp-server            # development (tsx)
+node dist/mcp-server.js       # after npm run build
 ```
 
-It exposes a `review_repository` tool. Inspect the implementation to determine
-its current input contract and whether it is suitable for the production model
-you propose.
+Example client configuration:
+
+```json
+{
+  "mcpServers": {
+    "repository-inspector": {
+      "command": "node",
+      "args": ["/absolute/path/to/ai-repo-inspector/dist/mcp-server.js"]
+    }
+  }
+}
+```
+
+Tool `review_repository`:
+
+| | |
+|---|---|
+| Input | `repo_path` (absolute, required), `base_ref` (optional). Unknown fields are rejected. |
+| Output | Markdown summary as text, plus `structuredContent` matching `ReviewResultSchema` (advertised as `outputSchema`). |
+| Annotations | `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`. |
+| Errors | `isError: true` with `error[CODE]: message` (capped at 2000 characters). |
+
+## What "changed files" means
+
+The tool lists every file that differs between the **working tree** and the
+**merge-base** of `HEAD` with the base ref. That covers commits on the branch
+plus staged, unstaged and untracked (non-ignored) changes, which is exactly
+what an agent or developer has in progress.
+
+Each file has one status: `added`, `modified`, `deleted`, `renamed` (with
+`previousPath`), `copied`, `type_changed`, `unmerged` or `untracked`. Paths are
+read NUL-separated, so spaces and non-ASCII names survive intact.
+
+## Output contract and limits
+
+- **Summary first:** every report and JSON result starts with a one-line
+  `summary`.
+- **File cap:** the file list is capped at **200** entries.
+  `totals.changedFiles` gives the real count and `truncated.changedFiles` says
+  whether the cap applied.
+- **Output cap:** validation output keeps the head and tail, up to **8000**
+  characters, and sets `outputTruncated` when it was cut.
+- **Untrusted text is contained:** paths, refs and command output are rendered
+  in code spans or fences that untrusted text cannot close, with control and
+  ANSI sequences stripped. The report labels this text as data, not
+  instructions.
+- **Deterministic:** results carry no timestamps. Validation `durationMs` is the
+  only value that varies between runs.
+
+## Safety measures
+
+- **Base refs:**
+  - refs starting with `-`, or containing whitespace or control characters,
+    are rejected;
+  - the rest are resolved with `git rev-parse --verify --end-of-options`;
+  - only the resulting SHA is passed to later git commands.
+- **Git hardening:**
+  - every git call disables `core.fsmonitor` and uses `--no-ext-diff
+    --no-textconv`, so a malicious repository config can't execute programs
+    during a read-only review;
+  - `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` are cleared from git's
+    environment;
+  - git calls have timeouts and bounded buffers.
+- **Residual risk:** a validation command such as `npm test` executes code the
+  repository controls. Only pass `--validate` for repositories you would run
+  the tests of anyway.
+
+## Error codes
+
+| Code | Meaning |
+|---|---|
+| `INVALID_ARGUMENTS` | CLI usage error (unknown flag, missing value, bad `--format`/`--timeout`). |
+| `INVALID_REPOSITORY` | Path missing, not a directory, not in a Git work tree, relative (MCP), or no commits. |
+| `INVALID_BASE_REF` | Base ref looks like an option or contains whitespace/control characters. |
+| `BASE_REF_NOT_FOUND` | Base ref doesn't resolve, no default base exists, or there is no common ancestor. |
+| `GIT_FAILED` | An unexpected git failure (message includes git's stderr, truncated). |
+| `OUTPUT_FAILED` | The CLI could not write the report file. |
+| `INTERNAL` | Unexpected bug; please report it. |
 
 ## Project layout
 
 ```text
-src/core.ts         shared review orchestration
-src/cli.ts          command-line adapter
-src/mcp-server.ts   MCP adapter
-src/git.ts          Git inspection
-src/validation.ts   validation execution
-src/report.ts       Markdown report generation
-test/               public starter tests
+src/core.ts         shared review orchestration (returns ReviewResult)
+src/schema.ts       ReviewResult zod schema and default limits (the shared contract)
+src/errors.ts       InspectorError codes shared by both adapters
+src/git.ts          hardened git inspection
+src/validation.ts   validation command runner (timeouts, tree kill, bounded output)
+src/report.ts       Markdown and JSON rendering
+src/cli-app.ts      CLI adapter (runCli); src/cli.ts is the bin entry
+src/mcp-app.ts      MCP adapter (createMcpServer); src/mcp-server.ts is the stdio entry
+test/               unit, integration (temp git repos) and CLI/MCP parity tests
 ```
-
-When finished, submit via **Security → Report a vulnerability** on this
-repo — see `SECURITY.md` for exactly what to include. Do not reply by email;
-that submission channel is not monitored.
