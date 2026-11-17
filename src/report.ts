@@ -39,9 +39,17 @@ function describeFile(file: ChangedFile): string {
   return `- ${file.status}: ${inlineCode(file.path)}`;
 }
 
+const STATUS_ICON: Record<ValidationResult["status"], string> = {
+  passed: "✅",
+  failed: "❌",
+  timed_out: "⏱",
+  error: "⚠️",
+};
+
 function describeValidation(result: ValidationResult): string[] {
-  const icon = result.status === "passed" ? "✅" : "❌";
-  const lines = [`### ${icon} ${result.status}: ${inlineCode(result.command)}`, "", ...fencedBlock(result.output)];
+  const exit = result.exitCode === null ? "no exit code" : `exit ${result.exitCode}`;
+  const heading = `### ${STATUS_ICON[result.status]} ${result.status} (${exit}, ${result.durationMs} ms): ${inlineCode(result.command)}`;
+  const lines = [heading, "", ...fencedBlock(result.output)];
   if (result.outputTruncated) lines.push("", `_Output truncated to ${result.output.length} characters._`);
   return lines;
 }

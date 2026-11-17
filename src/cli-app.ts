@@ -21,20 +21,24 @@ Options:
   --base-ref <ref>     Base branch, tag or commit. Default: origin/HEAD, then
                        main, then master.
   --validate <cmd>     Shell command to run in the repository root. Repeatable.
-                       Runs with your full permissions.
+                       Runs with your full permissions. Failures are reported,
+                       not fatal; the remaining commands still run.
+  --timeout <seconds>  Per-command validation timeout (default 300).
   --format <format>    markdown (default) or json.
   --output <file|->    Where to write the report. Default: review-report.md
                        (or review-report.json) in the current directory.
                        Use "-" for stdout.
   -h, --help           Show this help.
 
-Exit codes: 0 review completed, 1 a validation command failed,
-2 the review could not run (usage, input or internal error).`;
+Exit codes: 0 review completed and all validations passed, 1 review
+completed but a validation failed, timed out or could not start (the report
+is still written), 2 the review could not run (usage, input or internal error).`;
 
 const OPTIONS = {
   repo: { type: "string" },
   "base-ref": { type: "string" },
   validate: { type: "string", multiple: true },
+  timeout: { type: "string" },
   format: { type: "string" },
   output: { type: "string" },
   help: { type: "boolean", short: "h" },
@@ -68,12 +72,17 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   if (format !== "markdown" && format !== "json") {
     return usageError(io, `--format must be "markdown" or "json", got "${format}".`);
   }
+  const timeoutSeconds = values.timeout === undefined ? undefined : Number(values.timeout);
+  if (timeoutSeconds !== undefined && !(Number.isFinite(timeoutSeconds) && timeoutSeconds > 0)) {
+    return usageError(io, `--timeout must be a positive number of seconds, got "${values.timeout}".`);
+  }
 
   try {
     const result = await reviewRepository({
       repositoryPath: path.resolve(io.cwd, values.repo),
       baseRef: values["base-ref"],
       validationCommands: values.validate ?? [],
+      limits: timeoutSeconds === undefined ? undefined : { validationTimeoutMs: Math.round(timeoutSeconds * 1000) },
     });
     const rendered = format === "json" ? renderJson(result) : renderMarkdown(result);
     const output = values.output ?? (format === "json" ? "review-report.json" : "review-report.md");
@@ -94,7 +103,7 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
   } catch (error) {
     if (error instanceof InspectorError) {
       io.stderr(`${error.format()}\n`);
-      return error.code === "VALIDATION_FAILED" ? 1 : 2;
+      return 2;
     }
     io.stderr(`error[INTERNAL]: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;

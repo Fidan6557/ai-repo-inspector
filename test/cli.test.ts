@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli-app.js";
@@ -110,14 +110,39 @@ describe("inspector CLI", () => {
     expect(validation.output).toContain("validated ok");
   });
 
-  it("exits 1 with a clear message, not a stack trace, when a validation fails", async () => {
+  it("still writes the report, runs remaining commands, and exits 1 when a validation fails", async () => {
     const repo = repoWithChange();
 
-    const { code, stderr } = await cli(["review", "--repo", repo.root, "--output", "-", "--validate", `node -e "process.exit(3)"`]);
+    const { code, stdout, stderr } = await cli([
+      "review", "--repo", repo.root, "--output", "-",
+      "--validate", `node -e "console.error('boom');process.exit(3)"`,
+      "--validate", `node -e "console.log('second ran')"`,
+    ]);
 
     expect(code).toBe(1);
-    expect(stderr).toContain("error[VALIDATION_FAILED]: Validation command failed (exit 3)");
+    expect(stdout).toContain("### ❌ failed (exit 3,");
+    expect(stdout).toContain("boom");
+    expect(stdout).toContain("### ✅ passed (exit 0,");
+    expect(stdout).toContain("second ran");
+    expect(stderr).toContain("validations: 1 passed, 1 failed.");
     expect(stderr).not.toMatch(/\n\s+at /);
-    expect(existsSync(path.join(repo.root, "review-report.md"))).toBe(false);
+  });
+
+  it("times out hanging validations instead of waiting forever", async () => {
+    const repo = repoWithChange();
+
+    const { code, stdout } = await cli([
+      "review", "--repo", repo.root, "--format", "json", "--output", "-",
+      "--timeout", "0.5", "--validate", `node -e "setTimeout(()=>{},60000)"`,
+    ]);
+
+    expect(code).toBe(1);
+    expect(JSON.parse(stdout).validations[0]).toMatchObject({ status: "timed_out" });
+  });
+
+  it("rejects a non-positive timeout", async () => {
+    const { code, stderr } = await cli(["review", "--repo", ".", "--timeout", "0"]);
+    expect(code).toBe(2);
+    expect(stderr).toContain("--timeout must be a positive number of seconds");
   });
 });

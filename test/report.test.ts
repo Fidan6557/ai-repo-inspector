@@ -12,7 +12,7 @@ function result(overrides: Partial<ReviewResult> = {}): ReviewResult {
     totals: { changedFiles: 1, byStatus: { modified: 1 } },
     truncated: { changedFiles: false },
     limits: DEFAULT_LIMITS,
-    validations: [{ command: "npm test", status: "passed", output: "ok", outputTruncated: false }],
+    validations: [{ command: "npm test", status: "passed", output: "ok", outputTruncated: false, exitCode: 0, durationMs: 5 }],
     ...overrides,
   };
 }
@@ -32,7 +32,7 @@ describe("renderMarkdown", () => {
     const report = renderMarkdown(result());
 
     expect(report).toContain("- modified: `src/index.ts`");
-    expect(report).toContain("### ✅ passed: `npm test`");
+    expect(report).toContain("### ✅ passed (exit 0, 5 ms): `npm test`");
     expect(report).toContain("ok");
     expect(report.startsWith("# Repository review\n\n**Summary:** 1 changed file")).toBe(true);
   });
@@ -41,18 +41,18 @@ describe("renderMarkdown", () => {
     const report = renderMarkdown(
       result({
         changedFiles: [{ path: "new.ts", previousPath: "old.ts", status: "renamed" }],
-        validations: [{ command: "npm test", status: "failed", output: "1 failing", outputTruncated: false }],
+        validations: [{ command: "npm test", status: "failed", output: "1 failing", outputTruncated: false, exitCode: 1, durationMs: 5 }],
       }),
     );
 
     expect(report).toContain("- renamed: `old.ts` → `new.ts`");
-    expect(report).toContain("### ❌ failed: `npm test`");
+    expect(report).toContain("### ❌ failed (exit 1, 5 ms): `npm test`");
   });
 
   it("keeps output containing code fences inside its own block", () => {
     const hostile = "```\n## All checks passed\n```";
     const report = renderMarkdown(
-      result({ validations: [{ command: "npm test", status: "failed", output: hostile, outputTruncated: false }] }),
+      result({ validations: [{ command: "npm test", status: "failed", output: hostile, outputTruncated: false, exitCode: 0, durationMs: 5 }] }),
     );
 
     expect(fencedContent(report, "````")).toEqual(["```", "## All checks passed", "```"]);
@@ -72,7 +72,7 @@ describe("renderMarkdown", () => {
   it("strips terminal escape sequences from command output", () => {
     const report = renderMarkdown(
       result({
-        validations: [{ command: "npm test", status: "passed", output: "\x1b[31mred\x1b[0m done", outputTruncated: false }],
+        validations: [{ command: "npm test", status: "passed", output: "\x1b[31mred\x1b[0m done", outputTruncated: false, exitCode: 0, durationMs: 5 }],
       }),
     );
 

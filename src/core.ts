@@ -14,10 +14,13 @@ export async function reviewRepository(request: ReviewRequest): Promise<ReviewRe
   const base = await resolveBase(repository.root, request.baseRef);
   const allFiles = await changedFiles(repository.root, base.mergeBase);
 
-  const rawValidations = await runValidations(request.validationCommands ?? [], repository.root);
+  const rawValidations = await runValidations(request.validationCommands ?? [], repository.root, {
+    timeoutMs: limits.validationTimeoutMs,
+    maxCaptureChars: limits.maxOutputChars,
+  });
   const validations: ValidationResult[] = rawValidations.map((result) => {
     const { text, truncated } = truncateMiddle(result.output, limits.maxOutputChars);
-    return { command: result.command, status: result.status, output: text, outputTruncated: truncated };
+    return { ...result, output: text, outputTruncated: result.outputTruncated || truncated };
   });
 
   const byStatus: Record<string, number> = {};
@@ -39,8 +42,17 @@ export async function reviewRepository(request: ReviewRequest): Promise<ReviewRe
 function summarize(fileCount: number, baseRef: string, mergeBase: string, validations: ValidationResult[]): string {
   const files = `${fileCount} changed file${fileCount === 1 ? "" : "s"} compared with ${baseRef} (merge-base ${mergeBase.slice(0, 12)})`;
   if (validations.length === 0) return `${files}; no validation commands were run.`;
-  const failed = validations.filter((v) => v.status !== "passed").length;
-  return `${files}; validations: ${validations.length - failed} passed, ${failed} failed.`;
+  const labels: Record<ValidationResult["status"], string> = {
+    passed: "passed",
+    failed: "failed",
+    timed_out: "timed out",
+    error: "could not start",
+  };
+  const counts = (Object.keys(labels) as Array<ValidationResult["status"]>)
+    .map((status) => [labels[status], validations.filter((v) => v.status === status).length] as const)
+    .filter(([label, count]) => count > 0 || label === "passed")
+    .map(([label, count]) => `${count} ${label}`);
+  return `${files}; validations: ${counts.join(", ")}.`;
 }
 
 /** Keeps the head and tail of long output; failures usually show up at the end. */

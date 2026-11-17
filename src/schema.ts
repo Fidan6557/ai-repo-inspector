@@ -12,9 +12,11 @@ export type Limits = {
   maxFiles: number;
   /** Maximum characters of output kept per validation command. */
   maxOutputChars: number;
+  /** Per-command timeout for validation commands. */
+  validationTimeoutMs: number;
 };
 
-export const DEFAULT_LIMITS: Limits = { maxFiles: 200, maxOutputChars: 8000 };
+export const DEFAULT_LIMITS: Limits = { maxFiles: 200, maxOutputChars: 8000, validationTimeoutMs: 300_000 };
 
 export const ChangeStatusSchema = z.enum([
   "added",
@@ -35,8 +37,10 @@ export const ChangedFileSchema = z.object({
 
 export const ValidationResultSchema = z.object({
   command: z.string(),
-  status: z.enum(["passed", "failed"]),
-  output: z.string(),
+  status: z.enum(["passed", "failed", "timed_out", "error"]),
+  exitCode: z.number().int().nullable(),
+  durationMs: z.number().int(),
+  output: z.string().describe("Combined stdout/stderr; head and tail kept when long."),
   outputTruncated: z.boolean(),
 });
 
@@ -62,7 +66,11 @@ export const ReviewResultSchema = z.object({
   truncated: z.object({
     changedFiles: z.boolean().describe("True when changedFiles was cut to limits.maxFiles."),
   }),
-  limits: z.object({ maxFiles: z.number().int(), maxOutputChars: z.number().int() }),
+  limits: z.object({
+    maxFiles: z.number().int(),
+    maxOutputChars: z.number().int(),
+    validationTimeoutMs: z.number().int(),
+  }),
   validations: z.array(ValidationResultSchema),
 });
 
