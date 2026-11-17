@@ -329,15 +329,17 @@ corrections section.
 
 ## Approximate focused-work time
 
-Recorded from the commit and CI history (local time, UTC+4):
+All times are in UTC+4 (Azerbaijan time).
 
-- Planning (repository review and the approved plan, before implementation):
-  *candidate to record*
-- First implementation pass: 21:13–21:43
-- Second implementation pass (Windows CI and `--allowed-root`): 22:01–22:11
-- Final documentation review: *candidate to record*
+- **Planning and investigation:** Completed before 21:13. The exact focused duration was not separately recorded.
+- **First implementation pass:** 21:13–21:43 (30 minutes).
+- **Second implementation pass:** 22:01–22:11 (10 minutes), covering Windows CI and MCP repository access restrictions.
+- **Final documentation review:** Completed after the second implementation pass. The documentation update was committed at 22:23.
 
-Total focused time, including planning: *candidate to confirm*
+**Total focused work:** 40 minutes of confirmed implementation time, plus initial planning, investigation, and final documentation review, which were not timed separately.
 
-- Start: *candidate to confirm*
-- Finish: *candidate to confirm*
+**Start:** Before 21:13 (exact planning start not recorded).
+
+**Finish:** Final documentation milestone at 22:23 (exact end of focused work not separately recorded).
+
+The time record distinguishes verified implementation intervals from planning, review, breaks, and CI waiting time. No unverified durations have been included.
