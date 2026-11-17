@@ -1,28 +1,10 @@
-export type ChangeStatus =
-  | "added"
-  | "modified"
-  | "deleted"
-  | "renamed"
-  | "copied"
-  | "type_changed"
-  | "unmerged"
-  | "untracked";
+import type { Limits } from "./schema.js";
 
-export type ChangedFile = {
-  path: string;
-  status: ChangeStatus;
-  previousPath?: string;
-};
-
-export type ValidationResult = {
-  command: string;
-  status: "passed" | "failed";
-  output: string;
-};
+export type { ChangedFile, ChangeStatus, ReviewResult, ValidationResult } from "./schema.js";
 
 export type ReviewRequest = {
   repositoryPath: string;
   baseRef?: string;
   validationCommands?: string[];
-  format?: "markdown" | "json";
+  limits?: Partial<Limits>;
 };

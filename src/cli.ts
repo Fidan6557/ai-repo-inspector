@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { writeFileSync } from "node:fs";
 import { reviewRepository } from "./core.js";
+import { renderMarkdown } from "./report.js";
 
 type Args = {
   command: string;
@@ -35,13 +36,12 @@ async function main() {
     return;
   }
 
-  const report = await reviewRepository({
+  const result = await reviewRepository({
     repositoryPath: args.repositoryPath,
     baseRef: args.baseRef,
     validationCommands: args.validations,
-    format: args.format,
   });
-  writeFileSync("review-report.md", report, "utf8");
+  writeFileSync("review-report.md", renderMarkdown(result), "utf8");
   console.log("Review report written to review-report.md");
 }
 
