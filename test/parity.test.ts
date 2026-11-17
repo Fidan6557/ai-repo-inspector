@@ -30,10 +30,10 @@ function runRealCli(args: string[]): Promise<{ code: number | null; stdout: stri
   });
 }
 
-async function withRealMcpServer<T>(use: (client: Client) => Promise<T>): Promise<T> {
+async function withRealMcpServer<T>(use: (client: Client) => Promise<T>, serverArgs: string[] = []): Promise<T> {
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [...RUN_TS, path.join(PROJECT_ROOT, "src", "mcp-server.ts")],
+    args: [...RUN_TS, path.join(PROJECT_ROOT, "src", "mcp-server.ts"), ...serverArgs],
     cwd: PROJECT_ROOT,
     stderr: "pipe",
   });
@@ -77,8 +77,11 @@ describe("CLI and MCP parity (real processes)", { timeout: 60_000 }, () => {
     const [cliJson, cliMarkdown, mcp] = await Promise.all([
       runRealCli(["review", "--repo", repo.root, "--format", "json", "--output", "-"]),
       runRealCli(["review", "--repo", repo.root, "--format", "markdown", "--output", "-"]),
-      withRealMcpServer((client) =>
-        client.callTool({ name: "review_repository", arguments: { repo_path: repo.root } }),
+      // Scoped the way an operator would deploy it, so --allowed-root parsing
+      // and canonicalization are exercised in the real entry point too.
+      withRealMcpServer(
+        (client) => client.callTool({ name: "review_repository", arguments: { repo_path: repo.root } }),
+        ["--allowed-root", path.dirname(repo.root)],
       ),
     ]);
 

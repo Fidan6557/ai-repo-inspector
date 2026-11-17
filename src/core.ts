@@ -1,4 +1,4 @@
-import { changedFiles, resolveBase, resolveRepository } from "./git.js";
+import { changedFiles, resolveBase, resolveRepository, type RepositoryAuthorizer } from "./git.js";
 import { DEFAULT_LIMITS, SCHEMA_VERSION, type ReviewResult, type ValidationResult } from "./schema.js";
 import type { ReviewRequest } from "./types.js";
 import { runValidations } from "./validation.js";
@@ -8,9 +8,14 @@ import { runValidations } from "./validation.js";
  * into a ReviewRequest and render the returned ReviewResult; they must not add
  * behaviour of their own.
  */
-export async function reviewRepository(request: ReviewRequest): Promise<ReviewResult> {
+export type ReviewHooks = {
+  /** Called with the resolved repository root before any repository data is read. */
+  authorizeRepository?: RepositoryAuthorizer;
+};
+
+export async function reviewRepository(request: ReviewRequest, hooks: ReviewHooks = {}): Promise<ReviewResult> {
   const limits = { ...DEFAULT_LIMITS, ...request.limits };
-  const repository = await resolveRepository(request.repositoryPath);
+  const repository = await resolveRepository(request.repositoryPath, hooks.authorizeRepository);
   const base = await resolveBase(repository.root, request.baseRef);
   const allFiles = await changedFiles(repository.root, base.mergeBase);
 

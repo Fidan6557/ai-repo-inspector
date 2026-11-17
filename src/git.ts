@@ -68,7 +68,17 @@ export type RepositoryInfo = {
   branch: string | null;
 };
 
-export async function resolveRepository(repositoryPath: string): Promise<RepositoryInfo> {
+export type RepositoryAuthorizer = (root: string) => Promise<void>;
+
+/**
+ * Resolves the work-tree top level for `repositoryPath`. When `authorize` is
+ * given it runs as soon as the top level is known and before any further
+ * repository data is read.
+ */
+export async function resolveRepository(
+  repositoryPath: string,
+  authorize?: RepositoryAuthorizer,
+): Promise<RepositoryInfo> {
   if (!repositoryPath) {
     throw new InspectorError("INVALID_REPOSITORY", "A repository path is required.");
   }
@@ -88,6 +98,7 @@ export async function resolveRepository(repositoryPath: string): Promise<Reposit
     throw new InspectorError("INVALID_REPOSITORY", `Not inside a Git work tree: ${absolute}`);
   }
   const root = path.resolve(topLevel);
+  if (authorize) await authorize(root);
 
   const head = await tryGit(root, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
   if (!head) {
@@ -95,6 +106,12 @@ export async function resolveRepository(repositoryPath: string): Promise<Reposit
   }
   const branch = await tryGit(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
   return { root, head, branch: branch || null };
+}
+
+/** Absolute path of the repository's shared git directory (object store). */
+export async function gitCommonDir(root: string): Promise<string> {
+  const output = await git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  return path.resolve(output.trim());
 }
 
 export type BaseInfo = {

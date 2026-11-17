@@ -17,14 +17,20 @@ export type Fixture = {
  * config (this dev machine sets init.defaultBranch=master and autocrlf=true;
  * CI runners have no identity configured).
  */
-export function createRepo(options: { branch?: string; dirName?: string } = {}): Fixture {
-  const parent = realpathSync.native(mkdtempSync(path.join(tmpdir(), "inspector-test-")));
-  tempDirs.push(parent);
-  const emptyGlobalConfig = path.join(parent, "empty.gitconfig");
+/** A canonical (realpath) temporary directory, removed by cleanupRepos(). */
+export function makeTempDir(): string {
+  const dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), "inspector-test-")));
+  tempDirs.push(dir);
+  return dir;
+}
+
+export function createRepo(options: { branch?: string; dirName?: string; parentDir?: string } = {}): Fixture {
+  const scratch = makeTempDir();
+  const emptyGlobalConfig = path.join(scratch, "empty.gitconfig");
   writeFileSync(emptyGlobalConfig, "");
 
-  const root = path.join(parent, options.dirName ?? "repo");
-  mkdirSync(root);
+  const root = path.join(options.parentDir ?? scratch, options.dirName ?? "repo");
+  mkdirSync(root, { recursive: true });
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,

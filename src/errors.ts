@@ -1,6 +1,7 @@
 export type InspectorErrorCode =
   | "INVALID_ARGUMENTS"
   | "INVALID_REPOSITORY"
+  | "PATH_NOT_ALLOWED"
   | "INVALID_BASE_REF"
   | "BASE_REF_NOT_FOUND"
   | "GIT_FAILED"
