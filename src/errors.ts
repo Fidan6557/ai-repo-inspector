@@ -3,7 +3,9 @@ export type InspectorErrorCode =
   | "INVALID_REPOSITORY"
   | "INVALID_BASE_REF"
   | "BASE_REF_NOT_FOUND"
-  | "GIT_FAILED";
+  | "GIT_FAILED"
+  | "OUTPUT_FAILED"
+  | "VALIDATION_FAILED";
 
 /**
  * An expected, user-correctable failure. Both adapters render it the same way:

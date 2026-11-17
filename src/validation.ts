@@ -1,4 +1,6 @@
 import { exec } from "node:child_process";
+import { InspectorError } from "./errors.js";
+
 /** Raw outcome of one command; core.ts applies output limits. */
 export type CommandResult = {
   command: string;
@@ -10,7 +12,11 @@ export function runValidation(command: string, cwd: string): Promise<CommandResu
   return new Promise((resolve, reject) => {
     exec(command, { cwd }, (error, stdout, stderr) => {
       if (error) {
-        reject(error);
+        // Known limitation: a failing command still aborts the review (no
+        // report). It is surfaced as a typed error so the CLI can exit 1 with
+        // a clear message instead of a stack trace.
+        const detail = `${stderr || stdout || error.message}`.trim().slice(-2000);
+        reject(new InspectorError("VALIDATION_FAILED", `Validation command failed (exit ${error.code ?? "unknown"}): ${command}\n${detail}`));
         return;
       }
       resolve({ command, status: "passed", output: stdout || stderr });
