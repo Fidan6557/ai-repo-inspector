@@ -73,8 +73,8 @@ Exit codes:
 - **2**: the review could not run (bad arguments, not a Git repository, unknown
   or unsafe base ref, unwritable output).
 
-Validation commands run with `CI=1`, `NO_COLOR=1` and no stdin, so test runners
-don't enter watch mode or wait for input.
+Validation commands run with no stdin, `NO_COLOR=1`, and `CI=1` (unless `CI`
+is already set), so test runners don't enter watch mode or wait for input.
 
 ## MCP
 
