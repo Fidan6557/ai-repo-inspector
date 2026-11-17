@@ -1,6 +1,17 @@
+export type ChangeStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "type_changed"
+  | "unmerged"
+  | "untracked";
+
 export type ChangedFile = {
   path: string;
-  status: "added" | "modified" | "deleted" | "untracked";
+  status: ChangeStatus;
+  previousPath?: string;
 };
 
 export type ValidationResult = {

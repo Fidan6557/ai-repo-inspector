@@ -1,16 +1,15 @@
-import { changedFiles } from "./git.js";
+import { changedFiles, resolveBase, resolveRepository } from "./git.js";
 import { markdownReport } from "./report.js";
 import type { ReviewRequest } from "./types.js";
 import { runValidations } from "./validation.js";
 
 export async function reviewRepository(request: ReviewRequest): Promise<string> {
-  const files = changedFiles(request.repositoryPath, request.baseRef);
-  const validations = await runValidations(
-    request.validationCommands ?? [],
-    request.repositoryPath,
-  );
+  const repository = await resolveRepository(request.repositoryPath);
+  const base = await resolveBase(repository.root, request.baseRef);
+  const files = await changedFiles(repository.root, base.mergeBase);
+  const validations = await runValidations(request.validationCommands ?? [], repository.root);
   return markdownReport({
-    repositoryPath: request.repositoryPath,
+    repositoryPath: repository.root,
     changedFiles: files,
     validationResults: validations,
   });
